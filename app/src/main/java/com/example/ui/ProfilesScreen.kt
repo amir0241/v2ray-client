@@ -2,6 +2,8 @@ package com.example.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.ProxyProfile
 import com.example.ui.theme.*
+import kotlinx.coroutines.launch
 
 @Composable
 fun ProfilesScreen(viewModel: ProxyViewModel) {
@@ -35,9 +38,11 @@ fun ProfilesScreen(viewModel: ProxyViewModel) {
     var showAddOptionsDialog by remember { mutableStateOf(false) }
     var showManualAddDialog by remember { mutableStateOf(false) }
     var showSubscriptionDialog by remember { mutableStateOf(false) }
+    var editingProfile by remember { mutableStateOf<ProxyProfile?>(null) }
 
     val clipboardManager = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
     // Trigger import status notifications
     LaunchedEffect(importStatus) {
@@ -186,7 +191,17 @@ fun ProfilesScreen(viewModel: ProxyViewModel) {
                             isSelected = isSelected,
                             onSelect = { viewModel.selectProfile(profile.id) },
                             onCheckPing = { viewModel.testPing(profile) },
-                            onDelete = { viewModel.deleteProfile(profile.id) }
+                            onDelete = { viewModel.deleteProfile(profile.id) },
+                            onEdit = { editingProfile = profile },
+                            onShare = {
+                                val b64Url = com.example.utils.LinkParser.serialize(profile)
+                                if (b64Url.isNotEmpty()) {
+                                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(b64Url))
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("Configuration link copied to clipboard!")
+                                    }
+                                }
+                            }
                         )
                     }
                 }
@@ -313,6 +328,7 @@ fun ProfilesScreen(viewModel: ProxyViewModel) {
             var server by remember { mutableStateOf("") }
             var portStr by remember { mutableStateOf("443") }
             var uuidOrPass by remember { mutableStateOf("") }
+            var encryption by remember { mutableStateOf("2022-blake3-aes-256-gcm") }
             var transport by remember { mutableStateOf("tcp") }
             var path by remember { mutableStateOf("") }
             var tlsEnabled by remember { mutableStateOf(true) }
@@ -324,12 +340,15 @@ fun ProfilesScreen(viewModel: ProxyViewModel) {
                 title = { Text("New Node Profile", fontWeight = FontWeight.Bold, color = IceWhite) },
                 text = {
                     Box(modifier = Modifier.sizeIn(maxHeight = 400.dp)) {
-                        LazyColumn(
+                        Column(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
                         ) {
-                            item {
-                                Text("Protocol Type", color = PaleBlueGrey, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Protocol Type", color = PaleBlueGrey, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -360,51 +379,45 @@ fun ProfilesScreen(viewModel: ProxyViewModel) {
                                 }
                             }
 
-                            item {
-                                CustomInputField(label = "Profile Name Remarks", value = name, onValueChange = { name = it }, placeholder = "e.g. US Fast Relay")
+                            CustomInputField(label = "Profile Name Remarks", value = name, onValueChange = { name = it }, placeholder = "e.g. US Fast Relay")
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CustomInputField(label = "Host/Server IP", value = server, onValueChange = { server = it }, placeholder = "us.proxy.net", modifier = Modifier.weight(1.5f))
+                                CustomInputField(label = "Port", value = portStr, onValueChange = { portStr = it }, placeholder = "443", modifier = Modifier.weight(0.7f))
                             }
 
-                            item {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    CustomInputField(label = "Host/Server IP", value = server, onValueChange = { server = it }, placeholder = "us.proxy.net", modifier = Modifier.weight(1.5f))
-                                    CustomInputField(label = "Port", value = portStr, onValueChange = { portStr = it }, placeholder = "443", modifier = Modifier.weight(0.7f))
-                                }
-                            }
+                            CustomInputField(
+                                label = if (type == "Shadowsocks" || type == "Trojan") "Password" else "UUID",
+                                value = uuidOrPass,
+                                onValueChange = { uuidOrPass = it },
+                                placeholder = "e.g. key-or-uuid",
+                                isPassword = true
+                            )
 
-                            item {
-                                CustomInputField(
-                                    label = if (type == "Shadowsocks" || type == "Trojan") "Password" else "UUID",
-                                    value = uuidOrPass,
-                                    onValueChange = { uuidOrPass = it },
-                                    placeholder = "e.g. key-or-uuid",
-                                    isPassword = true
-                                )
+                            if (type == "Shadowsocks") {
+                                CustomInputField(label = "Encryption Cipher Method", value = encryption, onValueChange = { encryption = it }, placeholder = "e.g. 2022-blake3-aes-256-gcm or aes-256-gcm")
                             }
 
                             if (type == "VMess" || type == "VLESS") {
-                                item {
-                                    CustomInputField(label = "Path (WebSocket / gRPC Path)", value = path, onValueChange = { path = it }, placeholder = "/stream-socks")
-                                }
+                                CustomInputField(label = "Path (WebSocket / gRPC Path)", value = path, onValueChange = { path = it }, placeholder = "/stream-socks")
                             }
 
-                            item {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text("TLS Security Outbound", color = IceWhite, fontSize = 13.sp)
-                                    Switch(
-                                        checked = tlsEnabled,
-                                        onCheckedChange = { tlsEnabled = it },
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = CyberCyan,
-                                            checkedTrackColor = CyberCyan.copy(alpha = 0.4f),
-                                            uncheckedThumbColor = BorderSlate,
-                                            uncheckedTrackColor = TechCardBg
-                                        )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("TLS Security Outbound", color = IceWhite, fontSize = 13.sp)
+                                Switch(
+                                    checked = tlsEnabled,
+                                    onCheckedChange = { tlsEnabled = it },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = CyberCyan,
+                                        checkedTrackColor = CyberCyan.copy(alpha = 0.4f),
+                                        uncheckedThumbColor = BorderSlate,
+                                        uncheckedTrackColor = TechCardBg
                                     )
-                                }
+                                )
                             }
                         }
                     }
@@ -420,6 +433,7 @@ fun ProfilesScreen(viewModel: ProxyViewModel) {
                                     server = server,
                                     port = finalizedPort,
                                     uuid = uuidOrPass,
+                                    encryption = if (type == "Shadowsocks") encryption else "auto",
                                     path = path,
                                     tls = tlsEnabled,
                                     transport = if (path.isNotEmpty()) "ws" else "tcp"
@@ -441,6 +455,142 @@ fun ProfilesScreen(viewModel: ProxyViewModel) {
                 containerColor = TechCardBg
             )
         }
+
+        // EDIT NODE OVERLAY DIALOG
+        if (editingProfile != null) {
+            val profile = editingProfile!!
+            var name by remember(profile) { mutableStateOf(profile.name) }
+            var type by remember(profile) { mutableStateOf(profile.type) }
+            var server by remember(profile) { mutableStateOf(profile.server) }
+            var portStr by remember(profile) { mutableStateOf(profile.port.toString()) }
+            var uuidOrPass by remember(profile) { mutableStateOf(profile.uuid) }
+            var encryption by remember(profile) { mutableStateOf(profile.encryption) }
+            var transport by remember(profile) { mutableStateOf(profile.transport) }
+            var path by remember(profile) { mutableStateOf(profile.path) }
+            var tlsEnabled by remember(profile) { mutableStateOf(profile.tls) }
+
+            var selectTypeDropdown by remember { mutableStateOf(false) }
+
+            AlertDialog(
+                onDismissRequest = { editingProfile = null },
+                title = { Text("Edit Configuration Node", fontWeight = FontWeight.Bold, color = IceWhite) },
+                text = {
+                    Box(modifier = Modifier.sizeIn(maxHeight = 400.dp)) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            Text("Protocol Type", color = PaleBlueGrey, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(DarkCosmicSlate)
+                                        .clickable { selectTypeDropdown = true }
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = type, color = CyberCyan, fontWeight = FontWeight.Bold)
+                                    Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = "Select type", tint = CyberCyan)
+                                }
+                                DropdownMenu(
+                                    expanded = selectTypeDropdown,
+                                    onDismissRequest = { selectTypeDropdown = false },
+                                    modifier = Modifier.background(TechCardBg)
+                                ) {
+                                    listOf("VMess", "VLESS", "Trojan", "Shadowsocks").forEach { prot ->
+                                        DropdownMenuItem(
+                                            text = { Text(prot, color = IceWhite) },
+                                            onClick = {
+                                                type = prot
+                                                selectTypeDropdown = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            CustomInputField(label = "Profile Name Remarks", value = name, onValueChange = { name = it }, placeholder = "e.g. Frankfurt Premium")
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CustomInputField(label = "Host/Server IP", value = server, onValueChange = { server = it }, placeholder = "us.proxy.net", modifier = Modifier.weight(1.5f))
+                                CustomInputField(label = "Port", value = portStr, onValueChange = { portStr = it }, placeholder = "443", modifier = Modifier.weight(0.7f))
+                            }
+
+                            CustomInputField(
+                                label = if (type == "Shadowsocks" || type == "Trojan") "Password" else "UUID",
+                                value = uuidOrPass,
+                                onValueChange = { uuidOrPass = it },
+                                placeholder = "e.g. key-or-uuid",
+                                isPassword = true
+                            )
+
+                            if (type == "Shadowsocks") {
+                                CustomInputField(label = "Encryption Cipher Method", value = encryption, onValueChange = { encryption = it }, placeholder = "e.g. 2022-blake3-aes-256-gcm or aes-256-gcm")
+                            }
+
+                            if (type == "VMess" || type == "VLESS") {
+                                CustomInputField(label = "Path (WebSocket / gRPC Path)", value = path, onValueChange = { path = it }, placeholder = "/stream-socks")
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("TLS Security Outbound", color = IceWhite, fontSize = 13.sp)
+                                Switch(
+                                    checked = tlsEnabled,
+                                    onCheckedChange = { tlsEnabled = it },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = CyberCyan,
+                                        checkedTrackColor = CyberCyan.copy(alpha = 0.4f),
+                                        uncheckedThumbColor = BorderSlate,
+                                        uncheckedTrackColor = TechCardBg
+                                    )
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (server.isNotEmpty() && uuidOrPass.isNotEmpty()) {
+                                val finalizedPort = portStr.toIntOrNull() ?: 443
+                                val updatedProfile = profile.copy(
+                                    name = if (name.isNotEmpty()) name else "$type node",
+                                    type = type,
+                                    server = server,
+                                    port = finalizedPort,
+                                    uuid = uuidOrPass,
+                                    encryption = if (type == "Shadowsocks") encryption else "auto",
+                                    path = path,
+                                    tls = tlsEnabled,
+                                    transport = if (path.isNotEmpty()) "ws" else "tcp"
+                                )
+                                viewModel.updateProfile(updatedProfile)
+                                editingProfile = null
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = DarkCosmicSlate)
+                    ) {
+                        Text("Save Changes", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { editingProfile = null }) {
+                        Text("Cancel", color = PaleBlueGrey)
+                    }
+                },
+                containerColor = TechCardBg
+            )
+        }
     }
 }
 
@@ -450,7 +600,9 @@ fun ProfileItemCard(
     isSelected: Boolean,
     onSelect: () -> Unit,
     onCheckPing: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onEdit: () -> Unit,
+    onShare: () -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(12.dp),
@@ -576,12 +728,44 @@ fun ProfileItemCard(
                 )
             }
 
+            Spacer(modifier = Modifier.width(6.dp))
+
+            // Share icon (V2rayNG exported sharing format)
+            IconButton(
+                onClick = onShare,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = "Share Link",
+                    tint = CyberCyan,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            // Edit icon
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Edit Profile",
+                    tint = SolarPurple,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
             // Delete action button
-            IconButton(onClick = onDelete) {
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(28.dp)
+            ) {
                 Icon(
                     imageVector = Icons.Default.Delete,
                     contentDescription = "Delete configuration node",
-                    tint = DangerRed.copy(alpha = 0.8f)
+                    tint = DangerRed.copy(alpha = 0.8f),
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

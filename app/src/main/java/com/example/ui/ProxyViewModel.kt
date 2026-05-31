@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -44,6 +45,10 @@ class ProxyViewModel(private val repository: ProfileRepository) : ViewModel() {
     private val _importStatus = MutableStateFlow<String?>(null)
     val importStatus: StateFlow<String?> = _importStatus.asStateFlow()
 
+    // Public IP state
+    private val _currentPublicIp = MutableStateFlow("Direct Connection")
+    val currentPublicIp: StateFlow<String> = _currentPublicIp.asStateFlow()
+
     // Real-time speed history for drawing Canvas analytics charts (15 points)
     private val _downloadSpeedHistory = MutableStateFlow<List<Float>>(List(15) { 0f })
     val downloadSpeedHistory: StateFlow<List<Float>> = _downloadSpeedHistory.asStateFlow()
@@ -58,81 +63,88 @@ class ProxyViewModel(private val repository: ProfileRepository) : ViewModel() {
     val liveLatency: StateFlow<Int> = ProxyVpnService.latency
 
     init {
+        // Collect connection state to update public IP
+        viewModelScope.launch {
+            connectionState.collect { state ->
+                fetchPublicIp()
+            }
+        }
+
+        // Collect connection state to clear histories on disconnect
+        viewModelScope.launch {
+            connectionState.collect { state ->
+                if (state == ProxyVpnService.Companion.State.DISCONNECTED) {
+                    _downloadSpeedHistory.value = List(15) { 0f }
+                    _uploadSpeedHistory.value = List(15) { 0f }
+                }
+            }
+        }
+
         // Collect live download speeds to fill our Canvas chart history
         viewModelScope.launch {
             liveDownloadSpeed.collect { speed ->
-                val current = _downloadSpeedHistory.value.toMutableList()
-                if (current.size >= 15) current.removeAt(0)
-                current.add(speed.toFloat() / 1024f) // convert to KB/s
-                _downloadSpeedHistory.value = current
+                if (connectionState.value == ProxyVpnService.Companion.State.CONNECTED) {
+                    val current = _downloadSpeedHistory.value.toMutableList()
+                    if (current.size >= 15) current.removeAt(0)
+                    current.add(speed.toFloat() / 1024f) // convert to KB/s
+                    _downloadSpeedHistory.value = current
+                }
             }
         }
 
         viewModelScope.launch {
             liveUploadSpeed.collect { speed ->
-                val current = _uploadSpeedHistory.value.toMutableList()
-                if (current.size >= 15) current.removeAt(0)
-                current.add(speed.toFloat() / 1024f) // convert to KB/s
-                _uploadSpeedHistory.value = current
-            }
-        }
-
-        // Populate beautiful default profiles on first load if the DB is empty
-        viewModelScope.launch {
-            repository.allProfiles.collect { list ->
-                if (list.isEmpty()) {
-                    prepopulateDefaultProfiles()
+                if (connectionState.value == ProxyVpnService.Companion.State.CONNECTED) {
+                    val current = _uploadSpeedHistory.value.toMutableList()
+                    if (current.size >= 15) current.removeAt(0)
+                    current.add(speed.toFloat() / 1024f) // convert to KB/s
+                    _uploadSpeedHistory.value = current
                 }
             }
         }
-    }
 
-    private fun prepopulateDefaultProfiles() {
         viewModelScope.launch {
-            val defaults = listOf(
-                ProxyProfile(
-                    name = "⚡ London High-Speed [VLESS]",
-                    type = "VLESS",
-                    server = "uk-node1.v2proxy.net",
-                    port = 443,
-                    uuid = "e83cfb2e-9dcf-4ca6-b33c-396be3f04da6",
-                    transport = "ws",
-                    path = "/vless-ws",
-                    tls = true,
-                    sni = "uk-node1.v2proxy.net"
-                ),
-                ProxyProfile(
-                    name = "🇯🇵 Tokyo Super-Fast [VMess]",
-                    type = "VMess",
-                    server = "jp-tokyo.v2proxy.net",
-                    port = 8443,
-                    uuid = "cbb34f0e-3cc1-4dd2-80da-3375cbcf5532",
-                    transport = "grpc",
-                    path = "grpc/v2ray-stream",
-                    tls = true,
-                    sni = "jp-tokyo.v2proxy.net"
-                ),
-                ProxyProfile(
-                    name = "🇸🇬 Singapore Secure [Trojan]",
-                    type = "Trojan",
-                    server = "sg-node3.v2proxy.net",
-                    port = 443,
-                    uuid = "sg-secret-pass-993",
-                    tls = true,
-                    sni = "sg-node3.v2proxy.net"
-                ),
-                ProxyProfile(
-                    name = "🇺🇸 Silicon Valley Relay [SS]",
-                    type = "Shadowsocks",
-                    server = "us-ca.v2proxy.net",
-                    port = 10080,
-                    uuid = "chacha20-poly-password-key",
-                    encryption = "chacha20-ietf-poly1305"
-                )
+            val list = repository.allProfiles.first()
+            val oldDefaultNames = listOf(
+                "⚡ London High-Speed [VLESS]",
+                "🇯🇵 Tokyo Super-Fast [VMess]",
+                "🇸🇬 Singapore Secure [Trojan]",
+                "🇺🇸 Silicon Valley Relay [SS]",
+                "🇩🇪 Frankfurt Premium [VLESS]",
+                "🇳🇱 Amsterdam Fast [VMess]"
             )
-            for (index in defaults.indices) {
-                val profile = if (index == 0) defaults[index].copy(isSelected = true) else defaults[index]
-                repository.insertProfile(profile)
+            val hasOldDefaults = list.any { it.name in oldDefaultNames }
+            val hasNewDefault = list.any { it.server == "5.252.26.114" && it.port == 29688 }
+
+            if (hasOldDefaults || list.isEmpty() || !hasNewDefault) {
+                // Delete existing old defaults to keep the UI clean
+                for (profile in list) {
+                    if (profile.name in oldDefaultNames) {
+                        repository.deleteProfile(profile)
+                    }
+                }
+                
+                // Add the requested Shadowsocks node configuration as the main default config
+                if (!hasNewDefault) {
+                    val defaultLink = "ss://MjAyMi1ibGFrZTMtYWVzLTI1Ni1nY206OVBrMEkrZG9yU2tpemxoQm9nY0NpMWM1Um9JRnovWktCVzNYTDNzbWJyWT06a1h2T0UrcDEvVlFTU3pydVJPU1l6M0Z1QXNuOVY1VFlRdEM2bm5QeDFuST0@5.252.26.114:29688?type=tcp#sv30-j01ljt2u"
+                    val parsed = LinkParser.parse(defaultLink)
+                    if (parsed != null) {
+                        repository.insertProfile(parsed.copy(isSelected = true))
+                    } else {
+                        // Fallback insertion
+                        repository.insertProfile(
+                            ProxyProfile(
+                                name = "sv30-j01ljt2u",
+                                type = "Shadowsocks",
+                                server = "5.252.26.114",
+                                port = 29688,
+                                uuid = "9Pk0I+dorSkizlhBogcCi1c5RoIFz/ZKBW3XL3smbrY=:kXvOE+p1/VQSStrUROYSz3FuAsn9V5TYQtC6nnPx1nI=",
+                                encryption = "2022-blake3-aes-256-gcm",
+                                isSelected = true
+                            )
+                        )
+                    }
+                }
             }
         }
     }
@@ -161,6 +173,12 @@ class ProxyViewModel(private val repository: ProfileRepository) : ViewModel() {
         }
     }
 
+    fun updateProfile(profile: ProxyProfile) {
+        viewModelScope.launch {
+            repository.insertProfile(profile)
+        }
+    }
+
     fun deleteProfile(id: Long) {
         viewModelScope.launch {
             repository.deleteProfileById(id)
@@ -168,14 +186,30 @@ class ProxyViewModel(private val repository: ProfileRepository) : ViewModel() {
     }
 
     fun importFromLink(link: String) {
-        val parsed = LinkParser.parse(link)
-        if (parsed != null) {
-            viewModelScope.launch {
-                repository.insertProfile(parsed)
-                _importStatus.value = "Successfully imported \"${parsed.name}\"!"
+        val lines = link.split("\n", ",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.isEmpty()) {
+            _importStatus.value = "Error: Input is empty!"
+            return
+        }
+
+        viewModelScope.launch {
+            var successCount = 0
+            var lastName = ""
+            for (line in lines) {
+                val parsed = LinkParser.parse(line)
+                if (parsed != null) {
+                    repository.insertProfile(parsed)
+                    successCount++
+                    lastName = parsed.name
+                }
             }
-        } else {
-            _importStatus.value = "Error: Invalid link format!"
+            if (successCount == 1) {
+                _importStatus.value = "Successfully imported \"$lastName\"!"
+            } else if (successCount > 1) {
+                _importStatus.value = "Successfully imported $successCount configuration nodes!"
+            } else {
+                _importStatus.value = "Error: No valid proxy configurations found!"
+            }
         }
     }
 
@@ -242,6 +276,29 @@ class ProxyViewModel(private val repository: ProfileRepository) : ViewModel() {
                 }
             }
             repository.updateLatency(profile.id, simulatedPing)
+        }
+    }
+
+    fun fetchPublicIp() {
+        viewModelScope.launch {
+            if (connectionState.value == ProxyVpnService.Companion.State.CONNECTED) {
+                _currentPublicIp.value = selectedProfile.value?.server ?: "5.252.26.114"
+            } else {
+                _currentPublicIp.value = "Retrieving..."
+                val result = withContext(Dispatchers.IO) {
+                    try {
+                        val url = java.net.URL("https://api.ipify.org")
+                        val connection = url.openConnection() as java.net.HttpURLConnection
+                        connection.connectTimeout = 3000
+                        connection.readTimeout = 3000
+                        connection.inputStream.bufferedReader().use { it.readText().trim() }
+                    } catch (e: Exception) {
+                        Log.e("ProxyViewModel", "Error fetching IP: ${e.message}")
+                        "Direct Connection"
+                    }
+                }
+                _currentPublicIp.value = result
+            }
         }
     }
 

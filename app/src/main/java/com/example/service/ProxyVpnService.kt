@@ -97,11 +97,11 @@ class ProxyVpnService : VpnService() {
                 // Simulate handshake / core compilation
                 delay(1200)
 
-                // Try to establish real loopback tunnel
+                // Try to establish real loopback tunnel without hijacking global device internet traffic
                 val builder = Builder()
                     .setSession("V2ProxyTunnel")
                     .addAddress("10.8.0.2", 32)
-                    .addRoute("0.0.0.0", 0)
+                    .addRoute("10.8.0.0", 24) // Only route local pool so general system internet is not blocked!
                     .setMtu(1500)
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

@@ -166,7 +166,9 @@ object LinkParser {
         }
         
         val authPart = mainPart.substring(0, atIndex)
-        val serverAndPort = mainPart.substring(atIndex + 1)
+        val serverAndPortRaw = mainPart.substring(atIndex + 1)
+        val qIndex = serverAndPortRaw.indexOf('?')
+        val serverAndPort = if (qIndex != -1) serverAndPortRaw.substring(0, qIndex) else serverAndPortRaw
         
         val colonIndex = serverAndPort.lastIndexOf(':')
         if (colonIndex == -1) return null
@@ -195,5 +197,79 @@ object LinkParser {
             uuid = password,
             encryption = method
         )
+    }
+
+    fun serialize(profile: ProxyProfile): String {
+        return try {
+            when (profile.type) {
+                "VMess" -> {
+                    val json = JSONObject().apply {
+                        put("v", "2")
+                        put("ps", profile.name)
+                        put("add", profile.server)
+                        put("port", profile.port)
+                        put("id", profile.uuid)
+                        put("aid", profile.alterId)
+                        put("net", profile.transport)
+                        put("type", "none")
+                        put("host", profile.host)
+                        put("path", profile.path)
+                        put("tls", if (profile.tls) "tls" else "")
+                        put("sni", profile.sni)
+                    }
+                    val jsonBytes = json.toString().toByteArray(Charsets.UTF_8)
+                    val b64 = Base64.encodeToString(jsonBytes, Base64.NO_WRAP)
+                    "vmess://$b64"
+                }
+                "VLESS" -> {
+                    val query = mutableListOf<String>()
+                    query.add("type=${profile.transport}")
+                    if (profile.tls) query.add("security=tls")
+                    if (profile.path.isNotEmpty()) {
+                        query.add("path=${java.net.URLEncoder.encode(profile.path, "UTF-8")}")
+                    }
+                    if (profile.host.isNotEmpty()) {
+                        query.add("host=${java.net.URLEncoder.encode(profile.host, "UTF-8")}")
+                    }
+                    if (profile.sni.isNotEmpty()) {
+                        query.add("sni=${java.net.URLEncoder.encode(profile.sni, "UTF-8")}")
+                    }
+                    if (profile.flow.isNotEmpty()) {
+                        query.add("flow=${profile.flow}")
+                    }
+                    val queryStr = if (query.isNotEmpty()) "?" + query.joinToString("&") else ""
+                    val remark = java.net.URLEncoder.encode(profile.name, "UTF-8").replace("+", "%20")
+                    "vless://${profile.uuid}@${profile.server}:${profile.port}$queryStr#$remark"
+                }
+                "Trojan" -> {
+                    val query = mutableListOf<String>()
+                    query.add("type=${profile.transport}")
+                    if (profile.tls) query.add("security=tls")
+                    if (profile.path.isNotEmpty()) {
+                        query.add("path=${java.net.URLEncoder.encode(profile.path, "UTF-8")}")
+                    }
+                    if (profile.host.isNotEmpty()) {
+                        query.add("host=${java.net.URLEncoder.encode(profile.host, "UTF-8")}")
+                    }
+                    if (profile.sni.isNotEmpty()) {
+                        query.add("sni=${java.net.URLEncoder.encode(profile.sni, "UTF-8")}")
+                    }
+                    val queryStr = if (query.isNotEmpty()) "?" + query.joinToString("&") else ""
+                    val remark = java.net.URLEncoder.encode(profile.name, "UTF-8").replace("+", "%20")
+                    "trojan://${profile.uuid}@${profile.server}:${profile.port}$queryStr#$remark"
+                }
+                "Shadowsocks" -> {
+                    val auth = "${profile.encryption}:${profile.uuid}"
+                    val authBytes = auth.toByteArray(Charsets.UTF_8)
+                    val b64Auth = Base64.encodeToString(authBytes, Base64.NO_WRAP)
+                    val remark = java.net.URLEncoder.encode(profile.name, "UTF-8").replace("+", "%20")
+                    "ss://$b64Auth@${profile.server}:${profile.port}#$remark"
+                }
+                else -> ""
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            ""
+        }
     }
 }
