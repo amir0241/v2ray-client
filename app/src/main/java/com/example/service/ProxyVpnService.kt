@@ -86,10 +86,19 @@ class ProxyVpnService : VpnService() {
             .setOngoing(true)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(1, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(1, notification)
+            }
+        } catch (e: Exception) {
+            Log.e("ProxyVpnService", "Failed to start foreground with specialUse: ${e.message}")
+            try {
+                startForeground(1, notification)
+            } catch (ex: Exception) {
+                Log.e("ProxyVpnService", "Fallback startForeground also failed: ${ex.message}")
+            }
         }
 
         serviceScope.launch {

@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -82,11 +84,21 @@ class MainActivity : ComponentActivity() {
             val intent = Intent(this, ProxyVpnService::class.java).apply {
                 action = ProxyVpnService.ACTION_DISCONNECT
             }
-            startService(intent)
+            try {
+                startService(intent)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to stop VPN: ${e.message}")
+                Toast.makeText(this, "Failed to stop service: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
         } else {
             val vpnIntent = VpnService.prepare(this)
             if (vpnIntent != null) {
-                vpnPermissionLauncher.launch(vpnIntent)
+                try {
+                    vpnPermissionLauncher.launch(vpnIntent)
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Failed to launch VPN dialog: ${e.message}")
+                    Toast.makeText(this, "Failed to launch VPN settings: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             } else {
                 startVpnService(profile)
             }
@@ -99,10 +111,15 @@ class MainActivity : ComponentActivity() {
             putExtra(ProxyVpnService.EXTRA_SERVER_NAME, profile.name)
             putExtra(ProxyVpnService.EXTRA_PROTOCOL_TYPE, profile.type)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed to start VPN service: ${e.message}")
+            Toast.makeText(this, "Failed to start VPN service: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 }
