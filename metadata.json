@@ -1,0 +1,6 @@
+{
+  "name": "V2Proxy",
+  "description": "A modern, user-friendly multi-protocol client for managing VMess, VLESS, Shadowsocks, and Trojan proxies with elegant visual metrics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
