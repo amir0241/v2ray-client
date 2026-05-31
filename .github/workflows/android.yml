@@ -21,15 +21,14 @@ jobs:
         distribution: 'temurin'
         java-version: '21'
 
-    - name: Repair Gradle Wrapper Jar
-      run: |
-        mkdir -p gradle/wrapper
-        curl -L -o gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.12.0/gradle/wrapper/gradle-wrapper.jar
-
-    - name: Setup Gradle
+    - name: Setup Bootstrap Gradle
       uses: gradle/actions/setup-gradle@v3
       with:
-        gradle-version: wrapper
+        gradle-version: 8.12
+
+    - name: Regenerate Official Gradle Wrapper
+      run: |
+        gradle wrapper --gradle-version 9.3.1 --distribution-type bin
 
     - name: Set up Environment Secrets
       run: |
